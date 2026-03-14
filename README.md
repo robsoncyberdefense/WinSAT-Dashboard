@@ -47,8 +47,6 @@ Muitas ferramentas de terceiros são pesadas, pagas ou exigem instalação. Este
 
 O script gera um relatório HTML semelhante a este:
 
-*(Dica: Após gerar o relatório na sua máquina, tire um print bonito da tela e salve como `print_dashboard.png` na raiz do repositório para aparecer aqui)*
-
 ![Exemplo do Dashboard](print_dashboard.png)
 
 ## 🔍 O que é analisado?
