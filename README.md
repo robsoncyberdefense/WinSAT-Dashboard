@@ -76,4 +76,4 @@ Este projeto está sob a licença MIT. Sinta-se livre para usar em seus ambiente
 
 ---
 **Autor:** Robson Nunes - Analista de Cyber Security  
-**LinkedIn:** [https://www.linkedin.com/in/robsonsecurity]
+**LinkedIn:** https://www.linkedin.com/in/robsonsecurity
