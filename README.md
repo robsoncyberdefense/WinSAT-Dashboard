@@ -75,5 +75,5 @@ Sinta-se à vontade para abrir Issues ou Pull Requests se quiser adicionar novas
 Este projeto está sob a licença MIT. Sinta-se livre para usar em seus ambientes corporativos.
 
 ---
-**Autor:** Robson Nunes - Cyber Security
+**Autor:** Robson Nunes - Cyber Security - 
 **LinkedIn:** https://www.linkedin.com/in/robsonsecurity
