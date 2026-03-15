@@ -106,7 +106,35 @@ Para alterar o limite de softwares ou o caminho de saída, edite o script:
 
 ```powershell
 # Limite de softwares (linha ~105)
-if ($softwareList.Count -gt 500) {  # Altere 500 para outro valor
+if ($softwareList.Count -gt 500) { # Altere 500 para outro valor }
 
 # Caminho de saída (linha ~25)
-$folderPath = "C:\Relatorios"  # Altere para outro diretório
+$folderPath = "C:\Relatorios" # Altere para outro diretório
+```
+## 🤝 Contribuição
+Sinta-se à vontade para abrir **Issues** ou **Pull Requests** se quiser adicionar novas métricas ou melhorar o layout do HTML.
+
+## 📄 Licença
+Este projeto está sob a licença **MIT**.  
+Sinta-se livre para usar em ambientes corporativos.
+
+**Autor:** Robson Nunes – Cyber Security  
+**Versão:** 1.0  
+
+LinkedIn: https://www.linkedin.com/in/robsonsecurity  
+GitHub: https://github.com/robsoncyberdefense
+
+## 📝 Changelog
+### v1.0
+
+- ✅ Relatório HTML completo e responsivo
+- ✅ Benchmarks WinSAT (Disco, CPU, Memória, Gráficos)
+- ✅ Inventário de software (32/64-bit) com conversão de datas
+- ✅ Status de segurança (BitLocker, TPM, Drivers)
+- ✅ Battery Report para notebooks
+- ✅ HTML Encode para prevenção de XSS
+- ✅ Limitação de 500 softwares para performance
+- ✅ Criação automática do diretório de saída
+- ✅ Verificação de privilégios administrativos
+- ✅ Tratamento de erros robusto e fallbacks
+
