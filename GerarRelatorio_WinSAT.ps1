@@ -1,10 +1,10 @@
-﻿# ==============================================================================
-# SCRIPT MESTRE: Gerador de Relatório WinSAT
-# Autor: Robson Nunes Analista de Cyber Security
-# Função: Executa teste, analisa XMLs e gera dashboard HTML.
+# ==============================================================================
+# Gerador de Relatório WinSAT + Battery + Software - Versão: 1.0
+# Autor: Robson Nunes - Cyber Security
+# Função: Executa teste, analisa XMLs, battery report e gera dashboard HTML.
 # ==============================================================================
 
-# 1. Verificação de Privilégios (O WinSAT exige Admin)
+# 1. Verificação de Privilégios
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Host "❌ ERRO: Este script precisa ser executado como ADMINISTRADOR." -ForegroundColor Red
     Write-Host "💡 Clique com o botão direito no PowerShell e escolha 'Executar como Administrador'." -ForegroundColor Yellow
@@ -12,45 +12,143 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
     exit
 }
 
+# ✅ Limpar tela e configurar modo silencioso
+Clear-Host
+$ErrorActionPreference = 'SilentlyContinue'
+
 # 2. Configurações Iniciais
+# ✅ Caminho fixo em C: com criação automática e tratamento de erro
 $folderPath = "C:\Relatorios"
 if (-not (Test-Path $folderPath)) { 
-    New-Item -ItemType Directory -Path $folderPath -Force | Out-Null 
-    Write-Host "📁 Pasta de saída criada: $folderPath" -ForegroundColor Cyan
+    try {
+        New-Item -ItemType Directory -Path $folderPath -Force -ErrorAction Stop | Out-Null 
+        Write-Host "📁 Pasta de saída criada: $folderPath" -ForegroundColor Cyan
+    } catch {
+        Write-Host "❌ Erro: Não foi possível criar a pasta $folderPath. Verifique as permissões." -ForegroundColor Red
+        exit
+    }
+}
 
 $outputPath = Join-Path $folderPath "Relatorio_Completo_Performance.html"
-$basePath = "C:\Windows\Performance\WinSAT\DataStore"
+$basePath = Join-Path $env:SystemRoot "Performance\WinSAT\DataStore"
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$batteryReportPath = Join-Path $folderPath "BatteryReport_$timestamp.html"
+
+$outputPath = Join-Path $folderPath "Relatorio_Completo_Performance.html"
+# Caminho portável usando variável de ambiente
+$basePath = Join-Path $env:SystemRoot "Performance\WinSAT\DataStore"
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$batteryReportPath = Join-Path $folderPath "BatteryReport_$timestamp.html"
 
 # 3. Execução do WinSAT Formal
 Write-Host "🚀 Iniciando avaliação oficial do Windows (WinSAT Formal)..." -ForegroundColor Green
 Write-Host "⏳ Isso levará aproximadamente 2 minutos. Por favor, aguarde..." -ForegroundColor Yellow
-Write-Host "   (Não feche esta janela)"
+
+# Validar se executável WinSAT existe
+$winsatPath = "$env:SystemRoot\System32\winsat.exe"
+if (-not (Test-Path $winsatPath)) {
+    Write-Host "❌ WinSAT não encontrado neste sistema." -ForegroundColor Red
+    exit
+}
 
 try {
-    # Executa o teste ocultando a saída padrão para manter o console limpo
-    $process = Start-Process -FilePath "winsat.exe" -ArgumentList "formal" -Wait -PassThru -NoNewWindow
+    # Caminho explícito para evitar dependência do PATH
+    $process = Start-Process -FilePath $winsatPath -ArgumentList "formal" -Wait -PassThru -NoNewWindow
     
     if ($process.ExitCode -ne 0) {
         throw "O teste WinSAT falhou com código de erro $($process.ExitCode)."
     }
-    Write-Host "✅ Teste concluído com sucesso!" -ForegroundColor Green
+    Write-Host "✅ Teste WinSAT concluído com sucesso!" -ForegroundColor Green
 } catch {
     Write-Host "❌ Erro ao executar winsat formal: $_" -ForegroundColor Red
     exit
 }
 
+# ✅ AJUSTE: Pequena pausa para garantir que XMLs foram gravados
+Write-Host "⏳ Aguardando finalização da gravação dos arquivos..." -ForegroundColor Cyan
+Start-Sleep -Seconds 2
+
+# Verificar se arquivos XML foram gerados após execução
+Write-Host "🔍 Verificando arquivos gerados pelo WinSAT..." -ForegroundColor Cyan
+if (-not (Test-Path $basePath)) {
+    Write-Host "❌ Erro: diretório WinSAT não encontrado após execução: $basePath" -ForegroundColor Red
+    exit
+}
+
+$xmlCheck = Get-ChildItem "$basePath\*.xml" -ErrorAction SilentlyContinue | 
+    Where-Object { $_.Name -like "*Formal*" } | 
+    Select-Object -First 1
+
+if (-not $xmlCheck) {
+    Write-Host "❌ Erro: WinSAT executou mas não gerou arquivo Formal.Assessment." -ForegroundColor Red
+    exit
+}
+
+# 3.1 - Geração do Battery Report
+Write-Host "🔋 Gerando relatório de bateria (powercfg)..." -ForegroundColor Cyan
+try {
+    if (Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue) {
+        powercfg /batteryreport /output "$batteryReportPath" | Out-Null
+        Write-Host "✅ Battery report gerado: $batteryReportPath" -ForegroundColor Green
+        $hasBattery = $true
+    } else {
+        Write-Host "⚠️ Nenhuma bateria detectada (Desktop?). Pulando battery report." -ForegroundColor Yellow
+        $hasBattery = $false
+    }
+} catch {
+    Write-Host "⚠️ Não foi possível gerar battery report: $_" -ForegroundColor Yellow
+    $hasBattery = $false
+}
+
+# 3.2 - Inventário de Software Instalado
+Write-Host "📦 Coletando inventário de software instalado..." -ForegroundColor Cyan
+
+# ErrorAction SilentlyContinue para evitar erro em chaves corrompidas
+# Conversão de InstallDate para formato legível
+# Inclusão de InstallDate na seleção
+$softwareList = Get-ItemProperty `
+    HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
+    HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
+    -ErrorAction SilentlyContinue | 
+    Where-Object { $_.DisplayName } | 
+    Select-Object DisplayName, DisplayVersion, Publisher, 
+        @{Name="InstallDate";Expression={
+            if ($_.InstallDate) {
+                try {
+                    [datetime]::ParseExact($_.InstallDate, 'yyyyMMdd', $null).ToString("dd/MM/yyyy")
+                } catch { $_.InstallDate }
+            }
+        }} |
+    Sort-Object DisplayName -Unique  # Remove duplicatas
+
+# ✅ AJUSTE: Limitar inventário de software para evitar HTML muito grande
+if ($softwareList.Count -gt 500) {
+    Write-Host "⚠️ Inventário grande ($($softwareList.Count) itens). Limitando a 500 para melhor performance." -ForegroundColor Yellow
+    $softwareList = $softwareList | Select-Object -First 500
+    $softwareCountLimited = $true
+} else {
+    $softwareCountLimited = $false
+}
+
+# Contagem segura com Measure-Object
+$softwareCount = ($softwareList | Measure-Object).Count
+Write-Host "✅ $softwareCount aplicativos catalogados" -ForegroundColor Green
+
 # 4. Localização dos Arquivos XML
 Write-Host "🔍 Lendo arquivos de dados gerados..." -ForegroundColor Cyan
-$xmlFiles = Get-ChildItem "$basePath\*.xml" | Sort-Object LastWriteTime -Descending
 
-if ($xmlFiles.Count -lt 5) {
-    Write-Host "⚠️ Aviso: Poucos arquivos XML encontrados. A análise pode estar incompleta." -ForegroundColor Yellow
+# Leitura defensiva com -ErrorAction SilentlyContinue
+$xmlFiles = Get-ChildItem "$basePath\*.xml" -ErrorAction SilentlyContinue | 
+    Sort-Object LastWriteTime -Descending | 
+    Select-Object -First 20
+
+# Valida se arquivos XML foram encontrados
+if (-not $xmlFiles) {
+    Write-Host "❌ Erro: nenhum arquivo XML do WinSAT encontrado." -ForegroundColor Red
+    exit
 }
 
 $formalFile = $xmlFiles | Where-Object { $_.Name -like "*Formal*" } | Select-Object -First 1
-$diskFile = $xmlFiles | Where-Object { $_.Name -like "*Disk*" } | Select-Object -First 1
-$memFile = $xmlFiles | Where-Object { $_.Name -like "*Mem*" } | Select-Object -First 1
-$cpuFile = $xmlFiles | Where-Object { $_.Name -like "*Cpu*" } | Select-Object -First 1
 $dwmFile = $xmlFiles | Where-Object { $_.Name -like "*DWM*" } | Select-Object -First 1
 
 if (-not $formalFile) {
@@ -58,108 +156,236 @@ if (-not $formalFile) {
     exit
 }
 
-# 5. Função de Extração Robusta (Baseada nos seus XMLs reais)
-function Get-XmlValue($filePath, $tagName) {
-    try {
-        $content = Get-Content $filePath -Raw -ErrorAction SilentlyContinue
-        # Regex flexível para pegar valor numérico dentro da tag
-        if ($content -match "<$tagName[^>]*>([\d\.]+)</$tagName>") {
-            return [double]$matches[1]
-        }
-    } catch {}
-    return 0
+# Proteção adicional ao carregar XML com try/catch
+try {
+    [xml]$formalXml = Get-Content $formalFile.FullName -Raw -ErrorAction Stop
+} catch {
+    Write-Host "❌ Erro ao carregar XML Formal.Assessment" -ForegroundColor Red
+    exit
 }
 
-function Get-ModeloDisco($filePath) {
+[xml]$dwmXml = $null
+if ($dwmFile) {
     try {
-        $content = Get-Content $filePath -Raw -ErrorAction SilentlyContinue
-        # Tenta pegar o modelo do SystemDisk
-        if ($content -match '<SystemDisk[^>]*>.*?<Model><!\[CDATA\[(.*?)\]\]></Model>') {
-            return $matches[1].Trim()
-        }
-        # Fallback simples
-        if ($content -match '<Model><!\[CDATA\[(KINGSTON.*?)\]\]></Model>') {
-            return $matches[1].Trim()
-        }
-    } catch {}
-    return "SSD/HDD Genérico"
+        [xml]$dwmXml = Get-Content $dwmFile.FullName -Raw -ErrorAction Stop
+    } catch {
+        Write-Host "⚠️ Aviso: não foi possível carregar XML DWM" -ForegroundColor Yellow
+    }
 }
 
-# 6. Extração dos Dados (Mapeamento Exato)
+# 5. Função de Extração (XML já carregado - otimizado)
+function Get-XmlValueFromXml($xml, $tagName) {
+    try {
+        if ($xml) {
+            $node = $xml.SelectSingleNode("//$tagName")
+            if ($node -and $node.InnerText) {
+                return [double]$node.InnerText
+            }
+        }
+    }
+    catch {
+        Write-Host "⚠️ Aviso: erro ao extrair valor $tagName do XML" -ForegroundColor Yellow
+    }
+    
+    return $null
+}
+
+function Get-ModeloDisco($xml) {
+    try {
+        if ($xml) {
+            # Tenta encontrar via XPath direto
+            $modelNode = $xml.SelectSingleNode("//Model")
+            if ($modelNode -and $modelNode.InnerText) {
+                return $modelNode.InnerText.Trim()
+            }
+        }
+    } catch {
+        Write-Host "⚠️ Aviso: erro ao ler modelo do disco" -ForegroundColor Yellow
+    }
+    return "Não detectado"
+}
+
+# 6. Extração dos Dados
 Write-Host "📊 Processando métricas..." -ForegroundColor Gray
 
-# Scores Gerais (Do Formal)
-$sysScore = [math]::Round((Get-XmlValue $formalFile.FullName "SystemScore"), 2)
-$cpuScore = [math]::Round((Get-XmlValue $formalFile.FullName "CpuScore"), 2)
-$memScore = [math]::Round((Get-XmlValue $formalFile.FullName "MemoryScore"), 2)
-$gfxScore = [math]::Round((Get-XmlValue $formalFile.FullName "GraphicsScore"), 2)
-$diskScore = [math]::Round((Get-XmlValue $formalFile.FullName "DiskScore"), 2)
+# Scores Gerais (Verificação explícita contra $null)
+$sysScoreRaw = Get-XmlValueFromXml $formalXml "SystemScore"
+$sysScore = if ($sysScoreRaw -ne $null) { [math]::Round($sysScoreRaw, 2) } else { "N/A" }
 
-# Detalhes do Disco (Do Formal - DiskMetrics)
-# Usamos o Formal pois ele consolida as médias do teste de disco
-$diskSeqRead = [math]::Round((Get-XmlValue $formalFile.FullName "AvgThroughput"), 2) 
-# Nota: O AvgThroughput aparece duas vezes (Leitura e Escrita/Aleatória). O regex pega o primeiro (Sequencial).
-# Se for zero ou inválido, usamos um fallback baseado na sua máquina (404 MB/s)
-if ($diskSeqRead -eq 0 -or $diskSeqRead -gt 2000) { $diskSeqRead = 404.76 } 
+$cpuScoreRaw = Get-XmlValueFromXml $formalXml "CpuScore"
+$cpuScore = if ($cpuScoreRaw -ne $null) { [math]::Round($cpuScoreRaw, 2) } else { "N/A" }
 
-$diskRandRead = 97.54 # Valor fixo extraído do seu XML (Random Read) pois a tag é ambígua sem atributos complexos
-$diskModel = Get-ModeloDisco $formalFile.FullName
+$memScoreRaw = Get-XmlValueFromXml $formalXml "MemoryScore"
+$memScore = if ($memScoreRaw -ne $null) { [math]::Round($memScoreRaw, 2) } else { "N/A" }
 
-# Detalhes da Memória (Do Formal - MemoryMetrics)
-$memBandwidth = [math]::Round((Get-XmlValue $formalFile.FullName "Bandwidth"), 2)
-if ($memBandwidth -eq 0) { $memBandwidth = 26567.26 } # Fallback
+$gfxScoreRaw = Get-XmlValueFromXml $formalXml "GraphicsScore"
+$gfxScore = if ($gfxScoreRaw -ne $null) { [math]::Round($gfxScoreRaw, 2) } else { "N/A" }
 
-# Detalhes da CPU (Do Formal - CPUMetrics)
-$cpuEncrypt = [math]::Round((Get-XmlValue $formalFile.FullName "EncryptionMetric"), 2)
-$cpuCompress = [math]::Round((Get-XmlValue $formalFile.FullName "CompressionMetric"), 2)
+$diskScoreRaw = Get-XmlValueFromXml $formalXml "DiskScore"
+$diskScore = if ($diskScoreRaw -ne $null) { [math]::Round($diskScoreRaw, 2) } else { "N/A" }
 
-# Detalhes de Gráficos (Do DWM Assessment - Mais preciso que o 3D no Win11)
-$gfxFps = 0
-$gfxBandwidth = 0
-if ($dwmFile) {
-    $gfxFps = [math]::Round((Get-XmlValue $dwmFile.FullName "FPS"), 2)
-    $gfxBandwidth = [math]::Round((Get-XmlValue $dwmFile.FullName "MbVideoMemPerSecond"), 2)
+# Detalhes do Disco
+$diskSeqReadRaw = Get-XmlValueFromXml $formalXml "AvgThroughput"
+if ($diskSeqReadRaw -ne $null -and $diskSeqReadRaw -gt 0 -and $diskSeqReadRaw -lt 2000) {
+    $diskSeqRead = [math]::Round($diskSeqReadRaw, 2)
+} else {
+    $diskSeqRead = "N/A"
 }
-# Fallbacks caso o DWM não seja lido corretamente
-if ($gfxFps -eq 0) { $gfxFps = 520.68 }
-if ($gfxBandwidth -eq 0) { $gfxBandwidth = 8840.76 }
+
+$diskRandRead = "N/A"
+$diskModelRaw = Get-ModeloDisco $formalXml
+# Escapar modelo do disco no HTML
+$diskModel = ConvertTo-HtmlEncode -Text $diskModelRaw
+
+# Detalhes da Memória
+$memBandwidthRaw = Get-XmlValueFromXml $formalXml "Bandwidth"
+if ($memBandwidthRaw -ne $null -and $memBandwidthRaw -gt 0) {
+    $memBandwidth = [math]::Round($memBandwidthRaw, 2)
+} else {
+    $memBandwidth = "N/A"
+}
+
+# Detalhes da CPU
+$cpuEncryptRaw = Get-XmlValueFromXml $formalXml "EncryptionMetric"
+$cpuCompressRaw = Get-XmlValueFromXml $formalXml "CompressionMetric"
+$cpuEncrypt = if ($cpuEncryptRaw -ne $null) { [math]::Round($cpuEncryptRaw, 2) } else { "N/A" }
+$cpuCompress = if ($cpuCompressRaw -ne $null) { [math]::Round($cpuCompressRaw, 2) } else { "N/A" }
+
+# Detalhes de Gráficos
+$gfxFps = "N/A"
+$gfxBandwidth = "N/A"
+if ($dwmXml) {
+    $gfxFpsRaw = Get-XmlValueFromXml $dwmXml "FPS"
+    $gfxBandwidthRaw = Get-XmlValueFromXml $dwmXml "MbVideoMemPerSecond"
+    if ($gfxFpsRaw -ne $null) { $gfxFps = [math]::Round($gfxFpsRaw, 2) }
+    if ($gfxBandwidthRaw -ne $null) { $gfxBandwidth = [math]::Round($gfxBandwidthRaw, 2) }
+}
+
+# 6.1 - Informações do Sistema
+Write-Host "🖥️ Coletando informações do sistema..." -ForegroundColor Cyan
+
+# Proteção adicional para consultas CIM de hardware
+$osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+if (-not $osInfo) {
+    Write-Host "⚠️ Aviso: não foi possível coletar informações do SO" -ForegroundColor Yellow
+}
+
+# Garante apenas um processador (multi-socket/virtualização)
+$cpuInfo = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+# Verificação defensiva para CPU
+$cpuName = if ($cpuInfo) { ConvertTo-HtmlEncode -Text $cpuInfo.Name } else { "Não detectado" }
+
+# ✅ AJUSTE: Proteção adicional para cálculo de memória RAM com fallback explícito
+$ramModules = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue
+$ramSum = if ($ramModules) { ($ramModules | Measure-Object Capacity -Sum).Sum } else { 0 }
+$ramInfo = if ($ramSum -gt 0) {
+    [math]::Round($ramSum / 1GB, 2)
+} else {
+    "N/A"
+}
+
+# ✅ AJUSTE: Verificação defensiva para modelo do computador
+$computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+$computerModel = if ($computerSystem) { $computerSystem.Model } else { "Não detectado" }
+$computerModelEscaped = ConvertTo-HtmlEncode -Text $computerModel
+
+# Verificação defensiva para BIOS
+$biosInfo = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue | Select-Object -First 1
+$biosVersion = if ($biosInfo) { $biosInfo.SMBIOSBIOSVersion } else { "Não detectado" }
+
+# Verificação defensiva para GPU
+$gpuInfo = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($gpuInfo) {
+    $gpuName = ConvertTo-HtmlEncode -Text $gpuInfo.Name
+} else {
+    $gpuName = "Não detectado"
+}
+
+$tpmInfo = Get-CimInstance -Namespace "root\cimv2\Security\MicrosoftTpm" -ClassName Win32_Tpm -ErrorAction SilentlyContinue
+
+# Tempo de atividade (uptime)
+if ($osInfo -and $osInfo.LastBootUpTime) {
+    $uptime = (Get-Date) - $osInfo.LastBootUpTime
+    $uptimeString = "{0} dias, {1} horas, {2} minutos" -f $uptime.Days, $uptime.Hours, $uptime.Minutes
+} else {
+    $uptimeString = "N/A"
+}
+
+# ✅ AJUSTE: Fallback seguro para valores do sistema operacional
+$osCaption = if ($osInfo -and $osInfo.Caption) { ConvertTo-HtmlEncode -Text $osInfo.Caption } else { "Windows" }
+$osArchitecture = if ($osInfo -and $osInfo.OSArchitecture) { $osInfo.OSArchitecture } else { "Desconhecida" }
+$osVersion = if ($osInfo -and $osInfo.Version) { $osInfo.Version } else { "N/A" }
+$osBuildNumber = if ($osInfo -and $osInfo.BuildNumber) { $osInfo.BuildNumber } else { "N/A" }
 
 Write-Host "✅ Dados extraídos:" -ForegroundColor Green
 Write-Host "   Sistema: $sysScore | Disco: $diskScore ($diskSeqRead MB/s)" -ForegroundColor White
-Write-Host "   CPU: $cpuScore | Memória: $memScore ($memBandwidth MB/s)" -ForegroundColor White
 
-# 7. Lógica de Cores e Alertas
+# 6.2 - Coleta de Informações Adicionais
+Write-Host "🔍 Coletando informações adicionais..." -ForegroundColor Cyan
+
+# Status do BitLocker
+$bitlockerText = "❓ Não disponível"
+try {
+    $bitlocker = Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction SilentlyContinue
+    if ($bitlocker) {
+        $bitlockerStatus = $bitlocker.ProtectionStatus
+        if ($bitlockerStatus -eq 1) { $bitlockerText = "✅ Ativado" }
+        elseif ($bitlockerStatus -eq 0) { $bitlockerText = "⚠️ Desativado" }
+    }
+} catch {
+    $bitlockerText = "❓ Não disponível (Windows Home?)"
+}
+
+# Status do TPM
+if ($tpmInfo) {
+    $tpmText = "✅ TPM $(if($tpmInfo.SpecVersion) { $tpmInfo.SpecVersion } else { 'Detectado' })"
+} else {
+    $tpmText = "⚠️ Não detectado"
+}
+
+# Contagem segura de drivers com erro
+$driverErrors = (Get-CimInstance Win32_PnPEntity -Filter "ConfigManagerErrorCode <> 0" -ErrorAction SilentlyContinue | Measure-Object).Count
+if ($driverErrors -gt 0) {
+    $driverText = "❌ $driverErrors com erro"
+} else {
+    $driverText = "✅ Todos OK"
+}
+
+# 7. Lógica de Cores
 function Get-Color($s) { 
-    if ($s -eq 0) { return "#cccccc" }
-    if ($s -lt 4.0) { return "#dc3545" } 
-    elseif ($s -lt 6.0) { return "#ffc107" } 
+    if ($s -eq $null -or $s -eq "N/A") { return "#cccccc" }
+    
+    # Conversão explícita para valor numérico
+    $value = [double]$s
+    
+    if ($value -lt 4.0) { return "#dc3545" } 
+    elseif ($value -lt 6.0) { return "#ffc107" } 
     else { return "#28a745" } 
 }
 
 $overallColor = Get-Color $sysScore
 $diskColor = Get-Color $diskScore
 
-# 8. Geração do HTML
+# 8. Geração do HTML COMPLETO
 $html = @"
 <!DOCTYPE html>
 <html lang='pt-br'>
 <head>
     <meta charset='UTF-8'>
-    <title>Relatório de Performance - WinSAT</title>
+    <title>Relatório Completo de Diagnóstico</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6f9; color: #333; margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.08); }
+        .container { max-width: 1100px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.08); }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
+        h2 { color: #34495e; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 40px; }
         .subtitle { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 0.9em; }
         
-        /* Cards de Score */
         .scores-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 20px; margin-bottom: 40px; }
         .score-card { background: #f8f9fa; border-radius: 10px; padding: 20px; text-align: center; border: 1px solid #e9ecef; transition: transform 0.2s; }
         .score-card:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
         .score-val { font-size: 2.5em; font-weight: 700; display: block; margin: 10px 0; }
         .score-label { text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; color: #6c757d; font-weight: 600; }
 
-        /* Seções Detalhadas */
         .section { margin-bottom: 30px; border: 1px solid #eee; border-radius: 8px; overflow: hidden; }
         .section-header { background: #34495e; color: #fff; padding: 15px 20px; font-size: 1.1em; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
         .section-body { padding: 20px; background: #fff; }
@@ -171,21 +397,75 @@ $html = @"
         .value { font-family: 'Consolas', monospace; color: #2c3e50; font-weight: 500; text-align: right; }
         .unit { color: #95a5a6; font-size: 0.85em; margin-left: 5px; }
 
-        /* Alertas */
         .alert { padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 6px solid; line-height: 1.6; }
         .alert-crit { background: #fdecea; color: #c0392b; border-color: #e74c3c; }
         .alert-warn { background: #fef9e7; color: #d35400; border-color: #f39c12; }
         .alert-ok { background: #eafaf1; color: #27ae60; border-color: #2ecc71; }
 
+        .software-table { max-height: 400px; overflow-y: auto; }
+        .software-table table { font-size: 0.85em; }
+        
         .footer { text-align: center; margin-top: 40px; font-size: 0.8em; color: #bdc3c7; border-top: 1px solid #eee; padding-top: 20px; }
+        
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .info-box { background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #3498db; }
+        .info-box strong { color: #2c3e50; display: block; margin-bottom: 5px; }
+        
+        .security-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .security-box { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; }
+        .security-box .status { font-size: 1.2em; font-weight: 600; margin-top: 5px; }
+        
+        .uptime-badge { background: #3498db; color: #fff; padding: 5px 15px; border-radius: 20px; font-size: 0.85em; display: inline-block; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div class='container'>
-        <h1>📊 Análise Completa de Desempenho</h1>
-        <div class='subtitle'>Computador: $($env:COMPUTERNAME) | Data: $(Get-Date -Format "dd/MM/yyyy HH:mm")<br>Fonte: Windows System Assessment Tool (WinSAT)</div>
+        <h1>📊 Relatório Completo de Diagnóstico</h1>
+        <div class='subtitle'>Computador: $($env:COMPUTERNAME) | Modelo: $computerModelEscaped<br>Data: $(Get-Date -Format "dd/MM/yyyy HH:mm")<br>SO: $osCaption $osArchitecture | Versão: $osVersion (Build $osBuildNumber)</div>
+
+        <!-- Informações do Sistema -->
+        <h2>💻 Informações do Sistema</h2>
+        <div class='info-grid'>
+            <div class='info-box'>
+                <strong>Processador</strong>
+                $cpuName
+            </div>
+            <div class='info-box'>
+                <strong>Memória RAM</strong>
+                $ramInfo GB
+            </div>
+            <div class='info-box'>
+                <strong>GPU</strong>
+                $gpuName
+            </div>
+            <div class='info-box'>
+                <strong>BIOS</strong>
+                $biosVersion
+            </div>
+        </div>
+        <div style='text-align: center;'>
+            <div class='uptime-badge'>⏱️ Uptime: $uptimeString</div>
+        </div>
+
+        <!-- Status de Segurança -->
+        <h2>🔒 Status de Segurança</h2>
+        <div class='security-grid'>
+            <div class='security-box'>
+                <div>BitLocker</div>
+                <div class='status'>$bitlockerText</div>
+            </div>
+            <div class='security-box'>
+                <div>TPM</div>
+                <div class='status'>$tpmText</div>
+            </div>
+            <div class='security-box'>
+                <div>Drivers</div>
+                <div class='status'>$driverText</div>
+            </div>
+        </div>
 
         <!-- Scores Principais -->
+        <h2>📈 Windows System Assessment Tool (WinSAT)</h2>
         <div class='scores-grid'>
             <div class='score-card'>
                 <span class='score-label'>Geral (Gargalo)</span>
@@ -221,10 +501,12 @@ $html = @"
                     <tr><td class='label'>Leitura Sequencial</td><td class='value'>$diskSeqRead <span class='unit'>MB/s</span></td></tr>
                     <tr><td class='label'>Leitura Aleatória</td><td class='value'>$diskRandRead <span class='unit'>MB/s</span></td></tr>
                 </table>
-                $(if($diskScore -lt 6.0) {
-                    "<div class='alert alert-crit'><strong>⚠️ ATENÇÃO:</strong> O desempenho do disco está abaixo do ideal para padrões modernos. Isso causa lentidão ao abrir aplicativos e durante varreduras do EDR.</div>"
-                } else {
+                $(if($diskScore -ne "N/A" -and $diskScore -lt 6.0) {
+                    "<div class='alert alert-crit'><strong>⚠️ ATENÇÃO:</strong> O desempenho do disco está abaixo do ideal para padrões modernos.</div>"
+                } elseif($diskScore -ne "N/A") {
                     "<div class='alert alert-ok'><strong>✅ Ótimo:</strong> Desempenho de disco adequado para operações de segurança e multitarefa.</div>"
+                } else {
+                    "<div class='alert alert-warn'><strong>⚠️:</strong> Não foi possível obter métricas detalhadas do disco.</div>"
                 })
             </div>
         </div>
@@ -272,17 +554,84 @@ $html = @"
             </div>
         </div>
 
+        <!-- Battery Report Section -->
+        $(if($hasBattery) {
+        "<h2>🔋 Relatório de Bateria</h2>
+        <div class='section'>
+            <div class='section-header'>
+                <span>Status da Bateria</span>
+            </div>
+            <div class='section-body'>
+                <p>Um relatório detalhado de bateria foi gerado e salvo em:</p>
+                <p style='background: #f8f9fa; padding: 10px; border-radius: 5px; font-family: Consolas; word-break: break-all;'>$batteryReportPath</p>
+                <p style='font-size: 0.9em; color: #666; margin-top: 10px;'>Este relatório contém informações sobre:</p>
+                <ul style='font-size: 0.9em; color: #666;'>
+                    <li>Capacidade de design vs capacidade atual</li>
+                    <li>Histórico de uso e duração</li>
+                    <li>Ciclos de carga/descarga</li>
+                    <li>Estimativa de vida útil</li>
+                </ul>
+            </div>
+        </div>"
+        })
+
+ 
+        <!-- Software Instalado -->
+
+<h2>📦 Inventário de Software ($softwareCount aplicativos)$(if($softwareCountLimited){' (limitado)'})</h2>
+<div class='section'>
+    <div class='section-header'>
+        <span>Programas Instalados</span>
+        <span>Total: $softwareCount</span>
+    </div>
+    <div class='section-body software-table'>
+        <table>
+            <thead>
+                <tr style='background: #f8f9fa; position: sticky; top: 0;'>
+                    <th style='text-align: left; padding: 10px;'>Aplicativo</th>
+                    <th style='text-align: left; padding: 10px;'>Versão</th>
+                    <th style='text-align: left; padding: 10px;'>Fabricante</th>
+                    <th style='text-align: left; padding: 10px;'>Data Instalação</th>
+                </tr>
+            </thead>
+            <tbody>
+$($softwareList | ForEach-Object {
+# Escapar caracteres especiais no HTML usando função nativa
+$displayName = ConvertTo-HtmlEncode -Text $_.DisplayName
+$displayVersion = ConvertTo-HtmlEncode -Text $_.DisplayVersion
+$publisher = ConvertTo-HtmlEncode -Text $_.Publisher
+$installDate = ConvertTo-HtmlEncode -Text $_.InstallDate
+
+"                        <tr>
+                            <td style='padding: 8px;'>$displayName</td>
+                            <td style='padding: 8px;'>$displayVersion</td>
+                            <td style='padding: 8px;'>$publisher</td>
+                            <td style='padding: 8px;'>$installDate</td>
+                        </tr>"
+})
+            </tbody>
+        </table>
+    </div>
+$(if($softwareCountLimited) {
+    "<p style='font-size:0.85em; color:#999; margin-top:10px; text-align:center;'>⚠️ Inventário limitado a 500 itens para melhor performance. Execute consulta direta ao registro para lista completa.</p>"
+})
+</div>
+
         <!-- Conclusão -->
-        <h3>💡 Veredito Técnico</h3>
-        $(if($sysScore -lt 5.0) {
+        <h2>💡 Veredito Técnico</h2>
+        $(if($sysScore -ne "N/A" -and $sysScore -lt 5.0) {
             "<div class='alert alert-crit'><strong>DIAGNÓSTICO CRÍTICO:</strong> O sistema possui limitações severas de hardware. A lentidão relatada é esperada e não culpa do software de segurança.</div>"
-        } elseif ($diskScore -lt 7.0) {
+        } elseif ($diskScore -ne "N/A" -and $diskScore -lt 7.0) {
             "<div class='alert alert-warn'><strong>DIAGNÓSTICO:</strong> O sistema é funcional, mas o disco pode ser um gargalo em tarefas intensivas de I/O (como varreduras completas). Considere otimizações ou upgrade futuro.</div>"
         } else {
             "<div class='alert alert-ok'><strong>DIAGNÓSTICO POSITIVO:</strong> O hardware está em boas condições. Qualquer lentidão deve ser investigada em configurações de software, drivers ou malware ativo, pois não é falta de capacidade bruta.</div>"
         })
 
-        <div class='footer'>Gerado automaticamente via PowerShell Script | Baseado nos arquivos XML originais do WinSAT.</div>
+        <div class='footer'>
+            <strong>🛠️ Suporte Técnico</strong><br>
+            Script Version: 1.0 | Desenvolvido por: Robson Nunes - Cyber Security<br>
+            Gerado automaticamente via PowerShell Script | WinSAT + Battery Report + Inventário de Software + Segurança
+        </div>
     </div>
 </body>
 </html>
@@ -301,3 +650,9 @@ try {
 }
 
 Write-Host "`n🎉 Processo finalizado!" -ForegroundColor Green
+Write-Host "📋 Resumo dos arquivos gerados:" -ForegroundColor Cyan
+Write-Host "   1. Relatório Principal: $outputPath" -ForegroundColor White
+if ($hasBattery) {
+    Write-Host "   2. Battery Report: $batteryReportPath" -ForegroundColor White
+}
+Write-Host "   3. Inventário: $softwareCount softwares catalogados" -ForegroundColor White
