@@ -52,8 +52,6 @@ O script gera um relatório HTML completo e profissional:
 
 ### Visão geral
 ![Dashboard](print_dashboard.png)
-
-### Detalhes do relatório
 ![Detalhes](print_dashboard2.png)
 
 ## 🔍 O que é analisado?
