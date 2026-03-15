@@ -2,22 +2,25 @@
 
 Transforme dados brutos de benchmark do Windows em relatórios profissionais de HTML automaticamente.
 
-Uma ferramenta PowerShell desenvolvida para analistas de Cyber Security, SysAdmins e suporte de TI que precisam identificar gargalos de hardware (Disco, RAM, CPU) e provar se a lentidão do sistema é causada por limitações físicas ou configurações de software (como EDR/Antivírus).
+Uma ferramenta PowerShell desenvolvida para analistas de Cyber Security, SysAdmins e suporte de TI que precisam identificar gargalos de hardware (Disco, RAM, CPU), auditar segurança (BitLocker, TPM) e inventariar software automaticamente.
 
 ## 🚀 Por que usar?
 
-Muitas ferramentas de terceiros são pesadas, pagas ou exigem instalação. Este script utiliza o **WinSAT (Windows System Assessment Tool)**, uma ferramenta nativa e assinada pela Microsoft, para:
+Muitas ferramentas de terceiros são pesadas, pagas ou exigem instalação. Este script utiliza o **WinSAT (Windows System Assessment Tool)** e cmdlets nativos do PowerShell para:
 
 1.  Executar benchmarks oficiais de Disco, Memória, CPU e Gráficos.
 2.  Extrair métricas críticas (Leitura Sequencial/Aleatória, Bandwidth, FPS do DWM).
 3.  Gerar um **Dashboard HTML visual e interativo** pronto para apresentação a clientes ou gestão.
 4.  Automatizar a defesa técnica: Prove com dados que o gargalo é o HD mecânico, não o antivírus.
+5.  **Auditar Segurança:** Verifique status do BitLocker, TPM e drivers com erro.
+6.  **Inventário de Software:** Liste todos os programas instalados com data de instalação.
+7.  **Battery Report:** Gere relatórios detalhados de saúde da bateria (notebooks).
 
 ## 🛠️ Requisitos
 
 -   Windows 10 ou Windows 11.
 -   PowerShell 5.1 ou superior (já vem instalado).
--   **Execução como Administrador** (Necessário para rodar o `winsat formal`).
+-   **Execução como Administrador** (Necessário para rodar o `winsat formal` e coletar dados de segurança).
 -   Notebook conectado à tomada (O WinSAT bloqueia execução em bateria).
 -   Ambiente Físico (O teste não roda em VMs ou sessões RDP remotas).
 
@@ -25,7 +28,7 @@ Muitas ferramentas de terceiros são pesadas, pagas ou exigem instalação. Este
 
 1.  Baixe este repositório clicando em **Code > Download ZIP** ou clone:
     ```bash
-    git clone https://github.com/robsoncyberdefense/WinSAT-Dashboard.git
+    git clone https://github.com/robsoncyberdefense/WinSAT-Dashboard.git  
     ```
 
 2.  Abra o **PowerShell como Administrador**.
@@ -45,13 +48,15 @@ Muitas ferramentas de terceiros são pesadas, pagas ou exigem instalação. Este
 
 ## 📸 Exemplo de Saída
 
-O script gera um relatório HTML semelhante a este:
+O script gera um relatório HTML completo e profissional:
 
 ![Exemplo do Dashboard](print_dashboard.png)
 
 ## 🔍 O que é analisado?
 
-O script extrai dados dos arquivos XML gerados pelo WinSAT (`Formal.Assessment`, `Disk`, `Mem`, `DWM`):
+O script extrai dados dos arquivos XML gerados pelo WinSAT (`Formal.Assessment`, `Disk`, `Mem`, `DWM`) e complementa com informações do sistema:
+
+### 📊 Performance (WinSAT)
 
 | Componente | Métricas Extraídas | Importância para Segurança/TI |
 | :--- | :--- | :--- |
@@ -60,20 +65,48 @@ O script extrai dados dos arquivos XML gerados pelo WinSAT (`Formal.Assessment`,
 | **CPU** | Criptografia, Compressão | Avalia capacidade de processamento de heurísticas em tempo real. |
 | **Gráficos** | FPS do DWM, Banda de Vídeo | Analisa a fluidez da interface (útil para troubleshooting de UI). |
 
+### 🔒 Segurança
+
+| Recurso | Verificação | Importância |
+| :--- | :--- | :--- |
+| **BitLocker** | Status (Ativado/Desativado) | Conformidade com políticas de criptografia de disco. |
+| **TPM** | Versão e presença | Requisito para Windows 11 e segurança de chaves. |
+| **Drivers** | Dispositivos com erro | Identifica falhas de hardware ou drivers desatualizados. |
+
+### 📦 Inventário
+
+| Dado | Detalhamento |
+| :--- | :--- |
+| **Software** | Nome, Versão, Fabricante, Data de Instalação |
+| **Limite** | Até 500 aplicativos (para performance do HTML) |
+| **Hardware** | Processador, RAM, GPU, BIOS, Uptime |
+
+### 🔋 Bateria (Notebooks)
+
+-   Gera relatório detalhado em `C:\Relatorios\BatteryReport_[TIMESTAMP].html`
+-   Inclui: Ciclos de carga, capacidade de design vs atual, histórico de uso.
+
+## 📂 Arquivos Gerados
+
+O script cria os seguintes arquivos em `C:\Relatorios\`:
+
+1.  `Relatorio_Completo_Performance.html` - Dashboard principal com todas as métricas.
+2.  `BatteryReport_[DATA_HORA].html` - Relatório detalhado da bateria (apenas notebooks).
+
 ## ⚠️ Limitações Conhecidas
 
 -   **Virtualização:** O comando `winsat formal` não executa dentro de Máquinas Virtuais (VMware, VirtualBox, Hyper-V) ou ambientes Cloud PC (Windows 365), retornando Erro 13.
 -   **Sessão Remota:** Não execute via RDP ou TeamViewer. O teste exige sessão local console (Erro 8/9).
 -   **Energia:** Notebooks devem estar conectados à fonte de energia.
+-   **Inventário Grande:** Em máquinas com mais de 500 softwares instalados, a lista será limitada para manter o HTML leve.
 
-## 🤝 Contribuição
+## 🔧 Personalização
 
-Sinta-se à vontade para abrir Issues ou Pull Requests se quiser adicionar novas métricas ou melhorar o layout do HTML.
+Para alterar o limite de softwares ou o caminho de saída, edite o script:
 
-## 📄 Licença
+```powershell
+# Limite de softwares (linha ~105)
+if ($softwareList.Count -gt 500) {  # Altere 500 para outro valor
 
-Este projeto está sob a licença MIT. Sinta-se livre para usar em seus ambientes corporativos.
-
----
-**Autor:** Robson Nunes - Cyber Security - 
-**LinkedIn:** https://www.linkedin.com/in/robsonsecurity
+# Caminho de saída (linha ~25)
+$folderPath = "C:\Relatorios"  # Altere para outro diretório
