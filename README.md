@@ -50,7 +50,11 @@ Muitas ferramentas de terceiros são pesadas, pagas ou exigem instalação. Este
 
 O script gera um relatório HTML completo e profissional:
 
-![Exemplo do Dashboard](print_dashboard.png)
+### Visão geral
+![Dashboard](print_dashboard.png)
+
+### Detalhes do relatório
+![Detalhes](print_dashboard2.png)
 
 ## 🔍 O que é analisado?
 
