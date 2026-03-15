@@ -16,6 +16,13 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
 Clear-Host
 $ErrorActionPreference = 'SilentlyContinue'
 
+# ✅ FUNÇÃO DE HTML ENCODE (nativo, não requer assemblies)
+function ConvertTo-HtmlEncode {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return "" }
+    return [System.Net.WebUtility]::HtmlEncode($Text)
+}
+
 # 2. Configurações Iniciais
 # ✅ Caminho fixo em C: com criação automática e tratamento de erro
 $folderPath = "C:\Relatorios"
@@ -30,12 +37,6 @@ if (-not (Test-Path $folderPath)) {
 }
 
 $outputPath = Join-Path $folderPath "Relatorio_Completo_Performance.html"
-$basePath = Join-Path $env:SystemRoot "Performance\WinSAT\DataStore"
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$batteryReportPath = Join-Path $folderPath "BatteryReport_$timestamp.html"
-
-$outputPath = Join-Path $folderPath "Relatorio_Completo_Performance.html"
-# Caminho portável usando variável de ambiente
 $basePath = Join-Path $env:SystemRoot "Performance\WinSAT\DataStore"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $batteryReportPath = Join-Path $folderPath "BatteryReport_$timestamp.html"
@@ -366,6 +367,9 @@ function Get-Color($s) {
 $overallColor = Get-Color $sysScore
 $diskColor = Get-Color $diskScore
 
+# Texto de limitação do inventário
+$limitationText = if ($softwareCountLimited) { ' (limitado)' } else { '' }
+
 # 8. Geração do HTML COMPLETO
 $html = @"
 <!DOCTYPE html>
@@ -575,26 +579,24 @@ $html = @"
         </div>"
         })
 
- 
         <!-- Software Instalado -->
-
-<h2>📦 Inventário de Software ($softwareCount aplicativos)$(if($softwareCountLimited){' (limitado)'})</h2>
-<div class='section'>
-    <div class='section-header'>
-        <span>Programas Instalados</span>
-        <span>Total: $softwareCount</span>
-    </div>
-    <div class='section-body software-table'>
-        <table>
-            <thead>
-                <tr style='background: #f8f9fa; position: sticky; top: 0;'>
-                    <th style='text-align: left; padding: 10px;'>Aplicativo</th>
-                    <th style='text-align: left; padding: 10px;'>Versão</th>
-                    <th style='text-align: left; padding: 10px;'>Fabricante</th>
-                    <th style='text-align: left; padding: 10px;'>Data Instalação</th>
-                </tr>
-            </thead>
-            <tbody>
+        <h2>📦 Inventário de Software ($softwareCount aplicativos)$limitationText</h2>
+        <div class='section'>
+            <div class='section-header'>
+                <span>Programas Instalados</span>
+                <span>Total: $softwareCount</span>
+            </div>
+            <div class='section-body software-table'>
+                <table>
+                    <thead>
+                        <tr style='background: #f8f9fa; position: sticky; top: 0;'>
+                            <th style='text-align: left; padding: 10px;'>Aplicativo</th>
+                            <th style='text-align: left; padding: 10px;'>Versão</th>
+                            <th style='text-align: left; padding: 10px;'>Fabricante</th>
+                            <th style='text-align: left; padding: 10px;'>Data Instalação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
 $($softwareList | ForEach-Object {
 # Escapar caracteres especiais no HTML usando função nativa
 $displayName = ConvertTo-HtmlEncode -Text $_.DisplayName
@@ -609,13 +611,13 @@ $installDate = ConvertTo-HtmlEncode -Text $_.InstallDate
                             <td style='padding: 8px;'>$installDate</td>
                         </tr>"
 })
-            </tbody>
-        </table>
-    </div>
+                    </tbody>
+                </table>
+            </div>
 $(if($softwareCountLimited) {
     "<p style='font-size:0.85em; color:#999; margin-top:10px; text-align:center;'>⚠️ Inventário limitado a 500 itens para melhor performance. Execute consulta direta ao registro para lista completa.</p>"
 })
-</div>
+        </div>
 
         <!-- Conclusão -->
         <h2>💡 Veredito Técnico</h2>
